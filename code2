@@ -1,0 +1,121 @@
+# -*- coding: utf-8 -*-
+"""
+Created on Mon Dec  4 12:58:48 2017
+
+@author: harveyr
+"""
+
+from __future__ import print_function, division
+
+import numpy as np
+from keras.layers import Convolution1D, Dense, MaxPooling1D, Flatten,Dropout
+#from keras.layers.recurrent import LSTM
+from keras.models import Sequential
+import pandas as pd
+import matplotlib.pyplot as plt
+from sklearn.metrics import f1_score
+from sklearn.preprocessing import OneHotEncoder
+#import timeseriesmaker
+__date__ = '2016-07-22'
+
+
+def make_timeseries_instances(timeseries, window_size):
+    timeseries = np.asarray(timeseries)
+    assert 0 < window_size < timeseries.shape[0]
+    X = np.atleast_3d(np.array([timeseries[start:start + window_size] for start in range(0, timeseries.shape[0] - window_size)]))
+    y = timeseries[window_size:]
+    q = np.atleast_3d([timeseries[-window_size:]])
+    return X, y, q
+
+
+timeseries = pd.read_csv("AUDUSD1.csv")
+timeseries = timeseries["0.5617"]
+
+timeseries = ((timeseries - timeseries.shift(1))/timeseries.shift(1))*100
+timeseries = np.array(timeseries)
+timeseries = timeseries[1:]
+#timeseries = timeseriesmaker.timeseries_maker(timeseries)
+
+input_lenght = 120
+#
+X, y, q = make_timeseries_instances(timeseries, input_lenght)
+#
+X = X[1:]
+y = y[1:]
+for i in range(len(y)):
+    if y[i] > 0:
+        y[i] = "1"
+    elif y[i] ==0:
+        y[i] = "0"
+    else:
+        y[i] ="-1"
+
+def one_hot(df, cols):
+    """
+    @param df pandas DataFrame
+    @param cols a list of columns to encode 
+    @return a DataFrame with one-hot encoding
+    """
+    for each in cols:
+        dummies = pd.get_dummies(df[each], prefix=each, drop_first=False)
+        df = pd.concat([df, dummies], axis=1)
+    return df
+
+y = one_hot(pd.DataFrame(y),[0])
+y = y.drop(0,1)
+y = np.array(y)
+
+
+
+#dfy = pd.DataFrame(y)
+#
+#dfy = pd.get_dummies(dfy)
+#y = np.array(dfy)
+
+test_size = int(0.05 * len(timeseries))     
+X_train, X_test, y_train, y_test = X[:-test_size], X[-test_size:], y[:-test_size], y[-test_size:]
+
+nb_filter = 20
+filter_length = 7
+window_size = input_lenght
+nb_input_series = 1
+nb_outputs = 1
+
+model = Sequential((
+    Convolution1D(nb_filter=nb_filter, filter_length=6, activation='relu', input_shape=(window_size, nb_input_series)),
+    Dropout(0.3),
+    Convolution1D(nb_filter=nb_filter, filter_length=3, activation='relu'),
+    MaxPooling1D(),
+    Dropout(0.3),
+    Convolution1D(nb_filter=nb_filter, filter_length=filter_length, activation='relu'),
+    MaxPooling1D(),
+    Dropout(0.3),
+    Flatten(),
+    Dense(3, activation='sigmoid')    # For binary classification, change the activation to 'sigmoid'
+))
+
+#model.compile(loss='mse', optimizer='adam', metrics=['mse'])
+model.compile(loss='categorical_crossentropy', optimizer='adam', metrics=['binary_accuracy'])
+
+
+
+
+model.fit(X_train, y_train, epochs=50, batch_size=32,validation_data=(X_test, y_test))
+
+pred = model.predict(X_test)
+actual1 = []
+pred1 = []
+#print('\n\nactual', 'predicted', sep='\t')
+for actual, predicted in zip(y_test, pred.squeeze()):
+#    print(actual.squeeze(), predicted, sep='\t')
+    actual1.append(actual.squeeze())
+    pred1.append(predicted)
+pred1 = pred1[11:]
+    
+plt.figure()  
+plt.plot(pred1,label = "predicted")
+plt.plot(y_test,label = "actual")
+plt.legend()
+
+
+model.save("forex1.h5")
